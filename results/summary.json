@@ -1,0 +1,29 @@
+{
+  "archives_verified": true,
+  "sample_files": 3985,
+  "sample_jpg": 3225,
+  "sample_txt": 387,
+  "sample_xml": 360,
+  "sample_docs": 3,
+  "sample_text_words": 2363,
+  "line_images_profiled": 359,
+  "preprocessed_images": 120,
+  "image_width": {
+    "mean": 1893.8217270194987,
+    "median": 2048.0,
+    "min": 313.0,
+    "max": 2448.0
+  },
+  "image_height": {
+    "mean": 408.5877437325905,
+    "median": 217.0,
+    "min": 81.0,
+    "max": 3946.0
+  },
+  "ink_fraction": {
+    "mean": 0.06924565867286134,
+    "median": 0.06525888166947864,
+    "min": 0.011912828279900284,
+    "max": 0.16321237061977803
+  }
+}

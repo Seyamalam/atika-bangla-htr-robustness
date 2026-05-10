@@ -1,0 +1,21 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Large/raw data and local working material
+datasets/
+data/
+
+# Secrets and local config
+.env
+.env.*
+*.token
+hf_token*
+
+# Generated document QA scratch
+docx_render/

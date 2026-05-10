@@ -1,0 +1,6 @@
+{
+  "repo_id": "shaoncsecu/BN-HTRd_Splitted",
+  "status": "blocked",
+  "reason": "403 GatedRepoError: token account is not authorized for BN-HTRd_Split.zip",
+  "next_action": "Visit https://huggingface.co/datasets/shaoncsecu/BN-HTRd_Splitted and request access, or continue with verified Mendeley v4 archives."
+}

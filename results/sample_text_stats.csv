@@ -1,0 +1,4 @@
+doc_id,file,characters_no_space,words,lines,unique_chars
+1,data/work/Sample_Small/Recognition_Ground_Truth_Texts/1/1.txt,1454,231,20,64
+100,data/work/Sample_Small/Recognition_Ground_Truth_Texts/100/100.txt,8592,1708,66,87
+50,data/work/Sample_Small/Recognition_Ground_Truth_Texts/50/50.txt,2377,424,33,83
