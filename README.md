@@ -14,7 +14,10 @@ The repository itself is the live manuscript: methods, computed results, plots, 
 | Sample extraction | `Sample_Small.zip` extracted and profiled |
 | Image analysis | 359 line/word images profiled |
 | Preprocessing analysis | 120 images processed and compared |
-| OCR CER/WER | Not run yet; needs line-label conversion and model training |
+| Line labels | Built from verified local Mendeley BN-HTRd archive |
+| Tiny OCR sanity run | Completed on 300 training lines |
+| First thesis OCR baseline | Completed on full local BN-HTRd line split |
+| Current in-domain test result | CRNN-CTC raw-line baseline: **CER 27.76%**, **WER 66.86%** |
 
 ## Research Question
 
@@ -70,6 +73,9 @@ uv python install 3.11
 uv python pin 3.11
 uv sync
 uv run atika-htr all
+uv run python scripts/build_line_dataset.py
+uv run python scripts/train_crnn_ctc.py --run-name crnn_ctc_tiny --epochs 3 --batch-size 8 --image-width 384 --max-train-rows 300 --max-val-rows 100 --max-test-rows 100 --device cpu
+uv run python scripts/train_crnn_ctc.py --run-name crnn_ctc_full_baseline --epochs 5 --batch-size 16 --image-width 384 --device cpu
 ```
 
 ## Dataset Status
@@ -178,6 +184,124 @@ Interpretation:
 - Mean ink fraction stays close to the raw estimate, so preprocessing is not simply flooding the image with foreground.
 - This preprocessing should be treated as an experimental condition, not a default: OCR models must be evaluated on raw and processed versions separately.
 
+## Line-Level Dataset Build
+
+The first requested blocker is now resolved. The workflow extracts only the needed directories from the verified Mendeley archive, reads the recognition ground-truth spreadsheets, reconstructs line text from word-level records, matches each line to its JPEG crop, and writes document-safe train/validation/test splits.
+
+Generated local files:
+
+```text
+data/processed/bn_htrd_lines/
+├── labels.csv
+├── train.csv
+├── val.csv
+├── test.csv
+├── vocab.json
+├── missing_line_images.csv
+└── summary.json
+```
+
+Dataset summary:
+
+| Metric | Value |
+|---|---:|
+| Matched labeled line images | 14,113 |
+| Source documents | 148 |
+| Pages | 768 |
+| Missing expected line images | 273 |
+| Character vocabulary, including CTC blank | 170 |
+| Maximum label length | 86 chars |
+| Mean label length | 43.07 chars |
+
+Split summary:
+
+| split   |   rows |   documents |   mean_chars |
+|:--------|-------:|------------:|-------------:|
+| train   |   9664 |         103 |        42.85 |
+| val     |   2221 |          22 |        44.61 |
+| test    |   2228 |          23 |        42.49 |
+
+The split is document-safe, so lines from the same source document do not appear across train, validation, and test. The 273 missing line images are recorded in `data/processed/bn_htrd_lines/missing_line_images.csv` and excluded from training/evaluation.
+
+## OCR Experiments
+
+The OCR model is a compact CRNN-CTC baseline: four convolution blocks, a two-layer bidirectional LSTM, character-level CTC output, greedy CTC decoding, and CER/WER evaluation. PyTorch detects Apple Silicon MPS on this machine, but `CTCLoss` is not implemented for MPS in the current PyTorch build, so these CTC runs use CPU for correctness and reproducibility.
+
+### Tiny Sanity Baseline
+
+Command:
+
+```bash
+uv run python scripts/train_crnn_ctc.py --run-name crnn_ctc_tiny --epochs 3 --batch-size 8 --image-width 384 --max-train-rows 300 --max-val-rows 100 --max-test-rows 100 --device cpu
+```
+
+Results:
+
+| Metric | Value |
+|---|---:|
+| Training lines | 300 |
+| Validation lines | 100 |
+| Test lines | 100 |
+| Runtime | 11.7 sec |
+| Test CTC loss | 3.6465 |
+| Test CER | 100.00% |
+| Test WER | 100.00% |
+
+Training history:
+
+|   epoch |   train_loss |   val_loss |   val_cer |   val_wer |   val_batches |
+|--------:|-------------:|-----------:|----------:|----------:|--------------:|
+|       1 |       4.4301 |     3.8259 |         1 |         1 |            13 |
+|       2 |       3.5944 |     3.7562 |         1 |         1 |            13 |
+|       3 |       3.5604 |     3.7006 |         1 |         1 |            13 |
+
+Interpretation: this deliberately tiny 300-line, 3-epoch run verifies that labels load, line images batch correctly, the Bangla character vocabulary is usable, and CTC loss decreases. It still decodes blank strings on the test examples, so it is a wiring sanity check, not an accuracy result.
+
+### Full BN-HTRd Baseline
+
+Command:
+
+```bash
+uv run python scripts/train_crnn_ctc.py --run-name crnn_ctc_full_baseline --epochs 5 --batch-size 16 --image-width 384 --device cpu
+```
+
+Results:
+
+| Metric | Value |
+|---|---:|
+| Training lines | 9,664 |
+| Validation lines | 2,221 |
+| Test lines | 2,228 |
+| Runtime | 9.8 min |
+| Test CTC loss | 1.0354 |
+| Test CER | **27.76%** |
+| Test WER | **66.86%** |
+
+Training history:
+
+|   epoch |   train_loss |   val_loss |   val_cer |   val_wer |   val_batches |
+|--------:|-------------:|-----------:|----------:|----------:|--------------:|
+|       1 |       3.4059 |     3.0355 |    0.8262 |    0.9842 |           139 |
+|       2 |       2.5533 |     2.4023 |    0.5975 |    0.9639 |           139 |
+|       3 |       1.7557 |     1.905  |    0.485  |    0.8735 |           139 |
+|       4 |       1.2965 |     1.59   |    0.4044 |    0.7937 |           139 |
+|       5 |       1.0387 |     1.4414 |    0.3767 |    0.7552 |           139 |
+
+Representative predictions:
+
+|   line_id | truth                                                 | pred                                              |
+|----------:|:------------------------------------------------------|:--------------------------------------------------|
+|     7_1_1 | বিশেষ সম্পাদকীয়                                       | বিশেষ সমদকয়                                      |
+|     7_1_2 | চট্টগ্রামবাসীর পাশে দাঁড়াতে হবে বিগ বিজনেস            | দটপ্রামবাসর পাশে দাড়াতে হবে কি বিজনেস            |
+|     7_1_3 | হাউসগুলোকে শুরুর দিকে কিছুটা ধীর গতিতে                | হাউসগুলোকে শরুর দিকে কিুটা ধীর গতিতে              |
+|     7_1_4 | সংক্রমণ ছড়ালেও চট্টগ্রাম ইতিমধ্যেই করোনার হটস্পট      | সংক্রমণ ছডালেও সপ্রাম ইতিনধ্যেই করোনার হসট        |
+|     7_1_5 | হিসেবে নজরে চলে এসেছে । দিন যতো গড়াচ্ছে , চট্টগ্রামে  | হিসেবে জরে চলে তবেছে । দিন যতে গরাদ্ছে স্রগ্রমে   |
+|     7_1_6 | করোনার চিকিৎসার নাজুক চিত্রই বেশ ভালভাবেই ফুটে        | করোনার দিকিংসার নাস্ুক ভিই কেশ ভালতাবেই মুধে      |
+|     7_1_7 | ওঠছে ।                                                | জজছে ।                                            |
+|     7_1_8 | প্রাপ্ত তথ্যমতে , চট্টগ্রামের চারটি হাসপাতালে পুরোদমে | প্রক্তে তথ্যমাজে , সটগ্ামের চরটি হাসাপতালে পরোদমে |
+
+Interpretation: the full run learns a real recognizer and produces non-blank Bangla predictions. Validation CER improves from **82.62%** to **37.67%** over five epochs, and validation loss is still falling at epoch 5. This is a first thesis baseline, not a final model; longer training, better width handling, stronger augmentations, and a preprocessing condition should all be evaluated next.
+
 ## Figures
 
 ![Sample image distributions](results/sample_image_distributions.png)
@@ -192,47 +316,26 @@ Figure 2. Estimated ink-density shift after preprocessing. This is a first diagn
 
 Figure 3. Raw vs processed sample line images. This figure makes the preprocessing effect inspectable instead of only numeric.
 
+![Tiny CRNN-CTC training curves](results/crnn_ctc_tiny_training.png)
+
+Figure 4. Tiny sanity-run CTC loss and validation CER/WER. Loss decreases, but greedy decoding remains blank after three short epochs.
+
+![Full CRNN-CTC baseline training curves](results/crnn_ctc_full_baseline_training.png)
+
+Figure 5. Full BN-HTRd CRNN-CTC baseline. Validation loss, CER, and WER improve across all five epochs.
+
 ## What We Should Do Next
 
-The next useful work is not more packaging. It is to produce the first real OCR baseline and a valid evaluation protocol.
+The next useful work is to improve the baseline and add the external robustness test. The first three requested milestones are now complete: line labels/splits, a tiny OCR sanity run, and a full in-domain CRNN-CTC baseline.
 
-### Step 1: Build line-level labels from the local Mendeley archive
+### Step 4: Improve the in-domain baseline
 
-The Mendeley archives are available and verified. Since the Hugging Face split ZIP is gated, the practical route is to extract the full `BN-HTR_Dataset.zip`, parse the line-level XML/TXT structure, and create:
+- Train the CRNN-CTC baseline for more epochs with early stopping.
+- Compare raw images against the preprocessing pipeline as a separate condition.
+- Add width bucketing or dynamic-width batches so long lines are not compressed as aggressively.
+- Add light geometric/contrast augmentation that matches real handwriting noise.
 
-```text
-data/processed/bn_htrd_lines/
-├── images/
-├── labels.csv
-├── train.csv
-├── val.csv
-└── test.csv
-```
-
-The split must be writer/document safe. We should avoid putting line images from the same source document into both train and test.
-
-### Step 2: Run a tiny sanity OCR experiment
-
-Before training a large model, run a deliberately small baseline:
-
-- 100-300 line images;
-- character or grapheme vocabulary built from labels;
-- CRNN + CTC;
-- 1-3 quick epochs on Apple Silicon CPU/MPS if available;
-- report whether loss decreases and whether decoding works.
-
-This catches label/path/tokenization problems early.
-
-### Step 3: Scale to the first thesis baseline
-
-Once the tiny run works:
-
-- train CRNN-CTC on the full line-level split;
-- evaluate CER/WER on BN-HTRd test;
-- rerun with preprocessing as a separate condition;
-- save predictions, errors, and confusion examples.
-
-### Step 4: Prepare the external real-world test set
+### Step 5: Prepare the external real-world test set
 
 For the 2703 real-world images, the most thesis-useful subset is:
 
@@ -241,23 +344,23 @@ For the 2703 real-world images, the most thesis-useful subset is:
 - never used for training;
 - evaluated only after model choices are fixed.
 
-### Step 5: Report the robustness gap
+### Step 6: Report the robustness gap
 
 The core thesis result should be a table like:
 
 | Model | Training data | Test data | Preprocessing | CER | WER | Robustness drop |
 |---|---|---|---|---:|---:|---:|
-| CRNN-CTC | BN-HTRd train | BN-HTRd test | Raw | TBD | TBD | baseline |
+| CRNN-CTC | BN-HTRd train | BN-HTRd test | Raw | 27.76% | 66.86% | baseline |
 | CRNN-CTC | BN-HTRd train | External subset | Raw | TBD | TBD | TBD |
 | CRNN-CTC | BN-HTRd train | BN-HTRd test | Processed | TBD | TBD | TBD |
 | CRNN-CTC | BN-HTRd train | External subset | Processed | TBD | TBD | TBD |
 
 ## Methodological Notes
 
-The current run produces preliminary dataset and preprocessing results, not final OCR accuracy. Final CER/WER requires a trained OCR model and clean line-level ground truth. The recommended experimental ladder is:
+The current run produces preliminary dataset, preprocessing, and first OCR baseline results. The recommended experimental ladder from here is:
 
-1. Create writer-safe train/validation/test splits for BN-HTRd.
-2. Train a compact baseline model such as CRNN-CTC on line-level images.
+1. Extend the CRNN-CTC run until validation CER plateaus.
+2. Rerun the baseline with preprocessing and augmentation as controlled ablations.
 3. Fine-tune one stronger transformer or grapheme-tokenized model.
 4. Annotate 300-500 external real-world line images.
 5. Report the in-domain BN-HTRd CER/WER, external CER/WER, and robustness drop.
@@ -268,6 +371,8 @@ The current run produces preliminary dataset and preprocessing results, not fina
 ```text
 src/atika_htr/cli.py                 Reproducible analysis CLI
 scripts/download_hf_split.py         HF gated split downloader, token read from stdin
+scripts/build_line_dataset.py        BN-HTRd line label and split builder
+scripts/train_crnn_ctc.py            CRNN-CTC sanity/full baseline trainer
 scripts/write_public_readme.py       README manuscript generator
 results/                            Generated result tables and figures
 ```
@@ -282,4 +387,4 @@ Raw data folders such as `datasets/` and `data/` are ignored by git.
 
 ## Current Limitation
 
-The Hugging Face `BN-HTRd_Splitted` archive is gated. The supplied token was not authorized for the ZIP, so this repository uses the verified public Mendeley archives and records the gated-access state in `results/hf_access_status.json`.
+The Hugging Face `BN-HTRd_Splitted` archive is gated. The supplied token was not authorized for the ZIP, so this repository uses the verified public Mendeley archives and records the gated-access state in `results/hf_access_status.json`. Model checkpoints are excluded from GitHub; metrics, histories, prediction examples, scripts, and plots are published.

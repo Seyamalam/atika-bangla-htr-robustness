@@ -1,64 +1,92 @@
-# Bangla HTR Robustness Thesis: Computed Setup and Preliminary Results
+# Bangla HTR Robustness Thesis: Current Results
 
 ## Environment
 
 - Platform: Apple Silicon macOS arm64
 - Python: uv-managed CPython 3.11
 - Package manager: uv
+- OCR runtime: PyTorch CPU for CTC training because `CTCLoss` is not implemented on MPS in the current PyTorch build
 
 ## Dataset Status
 
-- All Mendeley archives verified by SHA-256: **True**
+- All Mendeley archives verified by SHA-256: **true**
 - Downloaded archive folder: `/Users/seyam/Work/Research/Atika/datasets/BN-HTRd_Mendeley`
-- Hugging Face `shaoncsecu/BN-HTRd_Splitted` is access-restricted; an HF token is required before using it directly.
+- Hugging Face `shaoncsecu/BN-HTRd_Splitted` metadata is visible, but the ZIP remains gated for the supplied account.
 
-### Archive Inventory
+## Line-Level BN-HTRd Build
 
-| archive                  |   members |   uncompressed_bytes |    jpg |   txt |   xlsx |   xml |   pdf |   directories |
-|:-------------------------|----------:|---------------------:|-------:|------:|-------:|------:|------:|--------------:|
-| Automatic_Annotation.zip |    154374 |           1918135594 | 121572 | 15694 |      0 |     0 |    61 |         17020 |
-| BN-HTR_Dataset.zip       |    185856 |           2729377734 | 137721 | 16256 |    150 | 15168 |   127 |         16410 |
-| Sample_Small.zip         |      4378 |             81108514 |   3225 |   387 |      3 |   360 |     3 |           394 |
+The verified local Mendeley archive was converted into line-level OCR manifests:
 
-## Sample Dataset Findings
+- `data/processed/bn_htrd_lines/labels.csv`
+- `data/processed/bn_htrd_lines/train.csv`
+- `data/processed/bn_htrd_lines/val.csv`
+- `data/processed/bn_htrd_lines/test.csv`
+- `data/processed/bn_htrd_lines/vocab.json`
 
-- Files extracted/profiled from `Sample_Small.zip`: **3985**
-- Sample JPEG images: **3225**
-- Sample text files: **387**
-- Ground-truth documents in sample: **3**
-- Ground-truth words in sample documents: **2363**
-- Line/word images profiled: **359**
+Summary:
 
-### Image Quality Summary
+| Metric | Value |
+|---|---:|
+| Matched labeled line images | 14,113 |
+| Source documents | 148 |
+| Pages | 768 |
+| Missing expected line images | 273 |
+| Character vocabulary, including blank | 170 |
+| Mean label length | 43.07 chars |
+| Maximum label length | 86 chars |
 
-- Width mean/median/min/max: {'mean': 1893.8217270194987, 'median': 2048.0, 'min': 313.0, 'max': 2448.0}
-- Height mean/median/min/max: {'mean': 408.5877437325905, 'median': 217.0, 'min': 81.0, 'max': 3946.0}
-- Otsu ink-fraction mean/median/min/max: {'mean': 0.06924565867286134, 'median': 0.06525888166947864, 'min': 0.011912828279900284, 'max': 0.16321237061977803}
+Document-safe split:
 
-## Preliminary Thesis Interpretation
+| Split | Lines | Documents | Mean chars |
+|---|---:|---:|---:|
+| Train | 9,664 | 103 | 42.85 |
+| Validation | 2,221 | 22 | 44.61 |
+| Test | 2,228 | 23 | 42.49 |
 
-The proposal is technically viable, but the thesis should be framed as a controlled robustness study. The strongest design is to train and tune only on BN-HTRd, then evaluate on a separately annotated real-world subset.
+## OCR Baselines
 
-Recommended experiment ladder:
+### Tiny CRNN-CTC Sanity Run
 
-1. Dataset inventory and quality profiling, already implemented here.
-2. Writer-safe BN-HTRd split construction, avoiding page or writer leakage.
-3. Baseline CRNN-CTC or transformer fine-tuning on line images.
-4. External evaluation on 300-500 manually annotated real-world line images.
-5. Error analysis by quality bucket: skew, noise, lighting, handwriting density, and segmentation defects.
+- Train/val/test rows: 300 / 100 / 100
+- Epochs: 3
+- Runtime: 11.7 seconds
+- Test loss: 3.6465
+- Test CER/WER: 100.00% / 100.00%
 
-## Generated Files
+Interpretation: labels, image loading, Bangla vocabulary, batching, CTC loss, and decoding all execute correctly. Loss decreases, but greedy decoding remains blank at this tiny scale.
 
-- `archive_verification.csv`
-- `archive_inventory.csv`
-- `sample_manifest.csv`
-- `sample_text_stats.csv`
-- `sample_image_quality_metrics.csv`
-- `preprocessing_comparison.csv`
-- `sample_writer_safe_split_plan.csv`
-- `sample_image_distributions.png`
-- `preprocessing_ink_shift.png`
+### Full BN-HTRd CRNN-CTC Baseline
 
-## Important Limitation
+- Train/val/test rows: 9,664 / 2,221 / 2,228
+- Epochs: 5
+- Runtime: 9.8 minutes
+- Test loss: 1.0354
+- Test CER: **27.76%**
+- Test WER: **66.86%**
 
-These are preliminary computed results, not final OCR accuracy results. CER/WER requires running an OCR model and comparing predictions to line-level ground truth. The restricted Hugging Face split or a local full extraction plus label conversion is the next dependency for full model training.
+Validation trajectory:
+
+| Epoch | Train loss | Val loss | Val CER | Val WER |
+|---:|---:|---:|---:|---:|
+| 1 | 3.4059 | 3.0355 | 82.62% | 98.42% |
+| 2 | 2.5533 | 2.4023 | 59.75% | 96.39% |
+| 3 | 1.7557 | 1.9050 | 48.50% | 87.35% |
+| 4 | 1.2965 | 1.5900 | 40.44% | 79.37% |
+| 5 | 1.0387 | 1.4414 | 37.67% | 75.52% |
+
+Representative prediction:
+
+| Truth | Prediction |
+|---|---|
+| বিশেষ সম্পাদকীয় | বিশেষ সমদকয় |
+| চট্টগ্রামবাসীর পাশে দাঁড়াতে হবে বিগ বিজনেস | দটপ্রামবাসর পাশে দাড়াতে হবে কি বিজনেস |
+| হাউসগুলোকে শুরুর দিকে কিছুটা ধীর গতিতে | হাউসগুলোকে শরুর দিকে কিুটা ধীর গতিতে |
+
+## Next Experimental Step
+
+The first three requested milestones are complete. Next, improve the in-domain baseline before using it as the thesis anchor:
+
+1. Train longer with early stopping.
+2. Add raw vs preprocessed image ablation.
+3. Add dynamic-width batching or width buckets.
+4. Annotate the external real-world line subset and report the robustness gap.

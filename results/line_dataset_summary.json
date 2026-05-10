@@ -1,0 +1,26 @@
+{
+  "labels": 14113,
+  "documents": 148,
+  "pages": 768,
+  "missing_line_images": 273,
+  "vocab_size_with_blank": 170,
+  "max_chars": 86,
+  "mean_chars": 43.06695954084886,
+  "splits": {
+    "train": {
+      "rows": 9664,
+      "documents": 103,
+      "mean_chars": 42.84581953642384
+    },
+    "val": {
+      "rows": 2221,
+      "documents": 22,
+      "mean_chars": 44.612336785231875
+    },
+    "test": {
+      "rows": 2228,
+      "documents": 23,
+      "mean_chars": 42.48563734290844
+    }
+  }
+}

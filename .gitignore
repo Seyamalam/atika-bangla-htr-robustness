@@ -19,3 +19,6 @@ hf_token*
 
 # Generated document QA scratch
 docx_render/
+
+# Reproducible model checkpoints are local artifacts; publish metrics/examples instead.
+results/**/model.pt
