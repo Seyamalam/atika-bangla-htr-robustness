@@ -1,4 +1,6 @@
-# Bangla HTR Robustness Thesis: Current Results
+# Bangla HTR Robustness Thesis: Current Local Results
+
+This report summarizes the verified local BN-HTRd preparation and first in-domain OCR baseline. It does not yet include the external real-world robustness evaluation.
 
 ## Environment
 
@@ -81,6 +83,14 @@ Representative prediction:
 | বিশেষ সম্পাদকীয় | বিশেষ সমদকয় |
 | চট্টগ্রামবাসীর পাশে দাঁড়াতে হবে বিগ বিজনেস | দটপ্রামবাসর পাশে দাড়াতে হবে কি বিজনেস |
 | হাউসগুলোকে শুরুর দিকে কিছুটা ধীর গতিতে | হাউসগুলোকে শরুর দিকে কিুটা ধীর গতিতে |
+
+## What Is Not Proven Yet
+
+- No external real-world handwritten Bangla test set has been annotated or evaluated yet.
+- The split is document-safe, not proven writer-safe.
+- The CRNN-CTC baseline has not been tuned or trained to convergence.
+- The model uses fixed-width resizing, greedy decoding, and Unicode codepoint labels.
+- The result should not be compared directly with published BN-HTRd scores because this is a locally derived split.
 
 ## Next Experimental Step
 

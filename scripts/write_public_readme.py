@@ -131,9 +131,9 @@ def main() -> None:
 
     readme = f"""# Cross-Dataset Robustness of Bangla Handwritten Text Recognition
 
-This repository is a reproducible thesis/report workspace for evaluating how Bangla handwritten text recognition (HTR) systems behave when models trained on public benchmark data are tested against messier real-world handwriting.
+This repository is a reproducible thesis/report workspace for a Bangla handwritten text recognition (HTR) robustness study. The current state covers verified BN-HTRd data preparation and a first in-domain OCR baseline. The external real-world robustness evaluation is still a planned next stage, not a completed result.
 
-The repository itself is the live manuscript: methods, computed results, plots, limitations, and next steps are all in this README. The implementation is designed for Apple Silicon using `uv` and a native `macos-aarch64` Python runtime.
+The repository itself is the live manuscript: methods, computed results, plots, limitations, and next steps are all in this README. The implementation is designed for Apple Silicon using `uv` and a native `macos-aarch64` Python runtime. The CTC model currently trains on CPU because PyTorch's `CTCLoss` is not available on MPS in this environment.
 
 ## Status at a Glance
 
@@ -147,17 +147,17 @@ The repository itself is the live manuscript: methods, computed results, plots, 
 | Preprocessing analysis | 120 images processed and compared |
 | Line labels | Built from verified local Mendeley BN-HTRd archive |
 | Tiny OCR sanity run | Completed on 300 training lines |
-| First thesis OCR baseline | Completed on full local BN-HTRd line split |
+| First OCR baseline | Completed on the locally derived BN-HTRd line split |
 | Current in-domain test result | CRNN-CTC raw-line baseline: **CER {pct(full_summary["test_cer"])}**, **WER {pct(full_summary["test_wer"])}** |
 
 ## Research Question
 
-How robust are Bangla HTR models trained on BN-HTRd when evaluated outside their original benchmark distribution?
+How much accuracy is lost when Bangla HTR models trained and selected on BN-HTRd are evaluated on real-world handwritten Bangla outside the original benchmark distribution?
 
 The thesis contribution is framed around robustness rather than simply building another OCR model:
 
-- quantify the dataset gap between BN-HTRd and real-world handwritten Bangla images;
-- control the training/evaluation protocol so external performance is meaningful;
+- quantify the dataset gap between BN-HTRd and a separately annotated real-world handwritten Bangla subset;
+- control the training/evaluation protocol so external performance is meaningful and not contaminated by tuning on the external set;
 - analyze which image-quality factors are likely to drive recognition failure;
 - prepare an annotation and evaluation workflow for a 300-500 line real-world external test set.
 
@@ -169,7 +169,7 @@ flowchart LR
     B --> C[Dataset inventory]
     C --> D[Line/image quality profiling]
     D --> E[Preprocessing experiment]
-    E --> F[Writer-safe split plan]
+    E --> F[Document-safe split plan]
     F --> G[HTR model training]
     G --> H[BN-HTRd CER/WER]
     G --> I[External real-world CER/WER]
@@ -197,7 +197,7 @@ flowchart TD
 - Package manager: `uv`
 - Core libraries: OpenCV, Pillow, NumPy, pandas, matplotlib, Hugging Face Hub
 
-Reproduce the current results:
+Reproduce the current results after placing the Mendeley archives under `datasets/BN-HTRd_Mendeley/`:
 
 ```bash
 uv python install 3.11
@@ -228,9 +228,9 @@ Hugging Face split status:
 - Reason: {hf_status["reason"]}
 - Next action: {hf_status["next_action"]}
 
-## Computed Preliminary Results
+## Sample-Level Preliminary Results
 
-From the extracted `Sample_Small.zip` subset:
+These diagnostics come from the extracted `Sample_Small.zip` subset only. They are useful for checking the pipeline and inspecting image statistics, but they should not be treated as full-dataset measurements.
 
 - Files extracted/profiled: **{summary["sample_files"]:,}**
 - JPEG images: **{summary["sample_jpg"]:,}**
@@ -249,13 +249,13 @@ Image profile summary:
 
 ### Ground-Truth Text Sample
 
-The small public sample contains three ground-truth document text files. This confirms that the local workflow can read Bangla text metadata and produce document-level text statistics.
+The small public sample contains three ground-truth document text files. This confirms that the local workflow can read Bangla text metadata and produce document-level text statistics. It is not enough to characterize the complete BN-HTRd corpus.
 
 {text_md}
 
 ### Image Quality Metrics
 
-The image profile table below is computed over 359 sample line/word JPEGs. `laplacian_var` is used as a simple sharpness/edge-detail proxy, while `otsu_ink_fraction` approximates foreground stroke density after Otsu thresholding.
+The image profile table below is computed over 359 sample line/word JPEGs from `Sample_Small.zip`. `laplacian_var` is used as a simple sharpness/edge-detail proxy, while `otsu_ink_fraction` approximates foreground stroke density after Otsu thresholding.
 
 {image_desc_md}
 
@@ -263,7 +263,7 @@ Interpretation:
 
 - The median line/image width is **2048 px**, but heights vary widely, which means the sample mixes normal line images with taller crops or page-like fragments.
 - The median estimated ink fraction is about **0.065**, so most images are sparse foreground on bright background.
-- The max height of **3946 px** is a warning that training code must filter or normalize image aspect ratios before batching.
+- The max height of **3946 px** is a warning that the sample includes very tall crops; training code should inspect aspect ratios and normalize carefully before batching.
 
 ### Preprocessing Results
 
@@ -286,7 +286,7 @@ Interpretation:
 
 ## Line-Level Dataset Build
 
-The first requested blocker is now resolved. The workflow extracts only the needed directories from the verified Mendeley archive, reads the recognition ground-truth spreadsheets, reconstructs line text from word-level records, matches each line to its JPEG crop, and writes document-safe train/validation/test splits.
+The first requested blocker is now resolved for a local experimental split. The workflow extracts only the needed directories from the verified Mendeley archive, reads the recognition ground-truth spreadsheets, reconstructs line text from word-level records, matches each line to its JPEG crop, and writes document-safe train/validation/test splits.
 
 Generated local files:
 
@@ -317,11 +317,13 @@ Split summary:
 
 {split_md}
 
-The split is document-safe, so lines from the same source document do not appear across train, validation, and test. The 273 missing line images are recorded in `data/processed/bn_htrd_lines/missing_line_images.csv` and excluded from training/evaluation.
+The split is document-safe, so lines from the same source document do not appear across train, validation, and test. It should not be described as writer-safe unless the document IDs are independently verified to map one-to-one to writers. The 273 missing line images are recorded in `data/processed/bn_htrd_lines/missing_line_images.csv` and excluded from training/evaluation.
 
 ## OCR Experiments
 
 The OCR model is a compact CRNN-CTC baseline: four convolution blocks, a two-layer bidirectional LSTM, character-level CTC output, greedy CTC decoding, and CER/WER evaluation. PyTorch detects Apple Silicon MPS on this machine, but `CTCLoss` is not implemented for MPS in the current PyTorch build, so these CTC runs use CPU for correctness and reproducibility.
+
+These OCR numbers are first-pass experimental baselines. They are not directly comparable to published BN-HTRd scores because the split was locally derived, training was short, decoding is greedy, and the model has not been tuned.
 
 ### Tiny Sanity Baseline
 
@@ -377,13 +379,13 @@ Representative predictions:
 
 {examples_md}
 
-Interpretation: the full run learns a real recognizer and produces non-blank Bangla predictions. Validation CER improves from **{pct(full_summary["history"][0]["val_cer"])}** to **{pct(full_summary["history"][-1]["val_cer"])}** over five epochs, and validation loss is still falling at epoch 5. This is a first thesis baseline, not a final model; longer training, better width handling, stronger augmentations, and a preprocessing condition should all be evaluated next.
+Interpretation: the full run learns a non-trivial recognizer and produces non-blank Bangla predictions. Validation CER improves from **{pct(full_summary["history"][0]["val_cer"])}** to **{pct(full_summary["history"][-1]["val_cer"])}** over five epochs, and validation loss is still falling at epoch 5. This is a first local baseline, not a final thesis model; longer training, better width handling, stronger augmentations, and a preprocessing condition should all be evaluated next.
 
 ## Figures
 
 ![Sample image distributions](results/sample_image_distributions.png)
 
-Figure 1. Sample image width and ink-density distributions. These measurements help identify whether the public benchmark contains layout and stroke-density variation that should be controlled during training and evaluation.
+Figure 1. Sample image width and ink-density distributions. These sample-level measurements help identify layout and stroke-density variation that should be inspected on the full corpus.
 
 ![Preprocessing ink shift](results/preprocessing_ink_shift.png)
 
@@ -401,6 +403,26 @@ Figure 4. Tiny sanity-run CTC loss and validation CER/WER. Loss decreases, but g
 
 Figure 5. Full BN-HTRd CRNN-CTC baseline. Validation loss, CER, and WER improve across all five epochs.
 
+## What This Does and Does Not Prove
+
+What is solid:
+
+- The local Mendeley archives were verified against recorded sizes and SHA-256 hashes.
+- A reproducible line-level manifest was built from the verified local archive.
+- A document-level train/validation/test split exists and is usable for OCR experiments.
+- The tiny CRNN-CTC run validates image loading, labels, vocabulary construction, batching, CTC loss, and decoding.
+- The full CRNN-CTC run gives a concrete first in-domain baseline on the local split: **CER {pct(full_summary["test_cer"])}**, **WER {pct(full_summary["test_wer"])}**.
+
+What is not proven yet:
+
+- No external real-world handwritten Bangla test set has been annotated or evaluated yet, so the robustness gap is still unknown.
+- The local split is document-safe, not proven writer-safe.
+- The baseline has not been tuned, trained to convergence, compared with preprocessing, or compared with a stronger model.
+- The current model uses fixed-width resizing to 384 px, which likely harms long text lines.
+- The tokenizer is Unicode character/codepoint based; grapheme-cluster modeling may be more appropriate for Bangla.
+- WER is computed by whitespace token matching and should be interpreted cautiously for Bangla punctuation and spacing variation.
+- The sample image-quality analysis describes `Sample_Small.zip`, not the entire BN-HTRd image distribution.
+
 ## What We Should Do Next
 
 The next useful work is to improve the baseline and add the external robustness test. The first three requested milestones are now complete: line labels/splits, a tiny OCR sanity run, and a full in-domain CRNN-CTC baseline.
@@ -411,10 +433,11 @@ The next useful work is to improve the baseline and add the external robustness 
 - Compare raw images against the preprocessing pipeline as a separate condition.
 - Add width bucketing or dynamic-width batches so long lines are not compressed as aggressively.
 - Add light geometric/contrast augmentation that matches real handwriting noise.
+- Verify whether BN-HTRd document IDs correspond to writers before calling any split writer-safe.
 
 ### Step 5: Prepare the external real-world test set
 
-For the 2703 real-world images, the most thesis-useful subset is:
+For the external real-world image collection, the most thesis-useful subset is:
 
 - 300-500 manually annotated line images;
 - stratified by clean/noisy/skewed/low-contrast/dense handwriting;
@@ -434,7 +457,7 @@ The core thesis result should be a table like:
 
 ## Methodological Notes
 
-The current run produces preliminary dataset, preprocessing, and first OCR baseline results. The recommended experimental ladder from here is:
+The current run produces verified data preparation, sample-level preprocessing diagnostics, and a first OCR baseline on a local BN-HTRd split. The recommended experimental ladder from here is:
 
 1. Extend the CRNN-CTC run until validation CER plateaus.
 2. Rerun the baseline with preprocessing and augmentation as controlled ablations.
@@ -464,7 +487,7 @@ Raw data folders such as `datasets/` and `data/` are ignored by git.
 
 ## Current Limitation
 
-The Hugging Face `BN-HTRd_Splitted` archive is gated. The supplied token was not authorized for the ZIP, so this repository uses the verified public Mendeley archives and records the gated-access state in `results/hf_access_status.json`. Model checkpoints are excluded from GitHub; metrics, histories, prediction examples, scripts, and plots are published.
+The Hugging Face `BN-HTRd_Splitted` archive is gated for the current account, so this repository uses a locally derived split from the verified public Mendeley archives and records the gated-access state in `results/hf_access_status.json`. Model checkpoints are excluded from GitHub; metrics, histories, prediction examples, scripts, and plots are published.
 """
     (ROOT / "README.md").write_text(readme, encoding="utf-8")
 
