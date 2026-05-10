@@ -24,16 +24,66 @@ def main() -> None:
     summary = json.loads((RESULTS / "summary.json").read_text(encoding="utf-8"))
     hf_status = json.loads((RESULTS / "hf_access_status.json").read_text(encoding="utf-8"))
     inventory = pd.read_csv(RESULTS / "archive_inventory.csv")
+    verification = pd.read_csv(RESULTS / "archive_verification.csv")
+    text_stats = pd.read_csv(RESULTS / "sample_text_stats.csv")
+    metrics = pd.read_csv(RESULTS / "sample_image_quality_metrics.csv")
+    preprocessing = pd.read_csv(RESULTS / "preprocessing_comparison.csv")
 
     inv_md = inventory.assign(
         uncompressed_size=inventory["uncompressed_bytes"].map(lambda v: human_bytes(int(v)))
     )[["archive", "members", "uncompressed_size", "jpg", "txt", "xlsx", "xml", "pdf"]].to_markdown(index=False)
+    verification_md = verification[["file", "actual_size", "size_ok", "sha256_ok"]].assign(
+        actual_size=verification["actual_size"].map(lambda v: human_bytes(int(v)))
+    ).to_markdown(index=False)
+    text_md = text_stats.to_markdown(index=False)
+    image_desc_md = metrics[
+        [
+            "width",
+            "height",
+            "aspect_ratio",
+            "mean_intensity",
+            "std_intensity",
+            "laplacian_var",
+            "dark_fraction",
+            "otsu_ink_fraction",
+        ]
+    ].describe().round(3).to_markdown()
+    prep_desc_md = preprocessing[
+        [
+            "raw_mean",
+            "processed_mean",
+            "raw_laplacian_var",
+            "processed_laplacian_var",
+            "raw_ink_fraction",
+            "processed_ink_fraction",
+        ]
+    ].describe().round(3).to_markdown()
+    prep_means = preprocessing[
+        [
+            "raw_laplacian_var",
+            "processed_laplacian_var",
+            "raw_ink_fraction",
+            "processed_ink_fraction",
+        ]
+    ].mean().round(4).to_dict()
 
     readme = f"""# Cross-Dataset Robustness of Bangla Handwritten Text Recognition
 
 This repository is a reproducible thesis/report workspace for evaluating how Bangla handwritten text recognition (HTR) systems behave when models trained on public benchmark data are tested against messier real-world handwriting.
 
-The current implementation focuses on dataset acquisition, verification, inventory, image-quality analysis, preprocessing experiments, split planning, and manuscript-ready reporting. It is designed for Apple Silicon using `uv` and a native `macos-aarch64` Python runtime.
+The repository itself is the live manuscript: methods, computed results, plots, limitations, and next steps are all in this README. The implementation is designed for Apple Silicon using `uv` and a native `macos-aarch64` Python runtime.
+
+## Status at a Glance
+
+| Area | Current status |
+|---|---|
+| Dataset download | Official Mendeley BN-HTRd v4 archives downloaded locally |
+| Integrity checks | All four downloaded Mendeley files pass size and SHA-256 checks |
+| HF split | Metadata accessible, ZIP blocked by gated authorization |
+| Sample extraction | `Sample_Small.zip` extracted and profiled |
+| Image analysis | 359 line/word images profiled |
+| Preprocessing analysis | 120 images processed and compared |
+| OCR CER/WER | Not run yet; needs line-label conversion and model training |
 
 ## Research Question
 
@@ -95,7 +145,13 @@ uv run atika-htr all
 
 The official Mendeley BN-HTRd v4 files were downloaded and verified by SHA-256. Raw datasets are intentionally excluded from GitHub because they are large and should be retrieved from the original source.
 
+### Archive Inventory
+
 {inv_md}
+
+### Download Verification
+
+{verification_md}
 
 Hugging Face split status:
 
@@ -123,6 +179,43 @@ Image profile summary:
 - Height mean/median/min/max: `{summary["image_height"]}`
 - Otsu ink-fraction mean/median/min/max: `{summary["ink_fraction"]}`
 
+### Ground-Truth Text Sample
+
+The small public sample contains three ground-truth document text files. This confirms that the local workflow can read Bangla text metadata and produce document-level text statistics.
+
+{text_md}
+
+### Image Quality Metrics
+
+The image profile table below is computed over 359 sample line/word JPEGs. `laplacian_var` is used as a simple sharpness/edge-detail proxy, while `otsu_ink_fraction` approximates foreground stroke density after Otsu thresholding.
+
+{image_desc_md}
+
+Interpretation:
+
+- The median line/image width is **2048 px**, but heights vary widely, which means the sample mixes normal line images with taller crops or page-like fragments.
+- The median estimated ink fraction is about **0.065**, so most images are sparse foreground on bright background.
+- The max height of **3946 px** is a warning that training code must filter or normalize image aspect ratios before batching.
+
+### Preprocessing Results
+
+Preprocessing used denoising, CLAHE contrast enhancement, and adaptive thresholding. The goal here is not to claim OCR improvement yet; it is to measure how much the preprocessing changes image structure before model training.
+
+{prep_desc_md}
+
+Mean preprocessing shifts:
+
+- Raw Laplacian variance: **{prep_means["raw_laplacian_var"]}**
+- Processed Laplacian variance: **{prep_means["processed_laplacian_var"]}**
+- Raw ink fraction: **{prep_means["raw_ink_fraction"]}**
+- Processed ink fraction: **{prep_means["processed_ink_fraction"]}**
+
+Interpretation:
+
+- Edge/detail variance increases strongly after preprocessing, which is expected after binarization.
+- Mean ink fraction stays close to the raw estimate, so preprocessing is not simply flooding the image with foreground.
+- This preprocessing should be treated as an experimental condition, not a default: OCR models must be evaluated on raw and processed versions separately.
+
 ## Figures
 
 ![Sample image distributions](results/sample_image_distributions.png)
@@ -132,6 +225,70 @@ Figure 1. Sample image width and ink-density distributions. These measurements h
 ![Preprocessing ink shift](results/preprocessing_ink_shift.png)
 
 Figure 2. Estimated ink-density shift after preprocessing. This is a first diagnostic for whether binarization/contrast normalization is changing image structure enough to affect recognition.
+
+![Preprocessing preview grid](results/preprocessing_preview_grid.png)
+
+Figure 3. Raw vs processed sample line images. This figure makes the preprocessing effect inspectable instead of only numeric.
+
+## What We Should Do Next
+
+The next useful work is not more packaging. It is to produce the first real OCR baseline and a valid evaluation protocol.
+
+### Step 1: Build line-level labels from the local Mendeley archive
+
+The Mendeley archives are available and verified. Since the Hugging Face split ZIP is gated, the practical route is to extract the full `BN-HTR_Dataset.zip`, parse the line-level XML/TXT structure, and create:
+
+```text
+data/processed/bn_htrd_lines/
+├── images/
+├── labels.csv
+├── train.csv
+├── val.csv
+└── test.csv
+```
+
+The split must be writer/document safe. We should avoid putting line images from the same source document into both train and test.
+
+### Step 2: Run a tiny sanity OCR experiment
+
+Before training a large model, run a deliberately small baseline:
+
+- 100-300 line images;
+- character or grapheme vocabulary built from labels;
+- CRNN + CTC;
+- 1-3 quick epochs on Apple Silicon CPU/MPS if available;
+- report whether loss decreases and whether decoding works.
+
+This catches label/path/tokenization problems early.
+
+### Step 3: Scale to the first thesis baseline
+
+Once the tiny run works:
+
+- train CRNN-CTC on the full line-level split;
+- evaluate CER/WER on BN-HTRd test;
+- rerun with preprocessing as a separate condition;
+- save predictions, errors, and confusion examples.
+
+### Step 4: Prepare the external real-world test set
+
+For the 2703 real-world images, the most thesis-useful subset is:
+
+- 300-500 manually annotated line images;
+- stratified by clean/noisy/skewed/low-contrast/dense handwriting;
+- never used for training;
+- evaluated only after model choices are fixed.
+
+### Step 5: Report the robustness gap
+
+The core thesis result should be a table like:
+
+| Model | Training data | Test data | Preprocessing | CER | WER | Robustness drop |
+|---|---|---|---|---:|---:|---:|
+| CRNN-CTC | BN-HTRd train | BN-HTRd test | Raw | TBD | TBD | baseline |
+| CRNN-CTC | BN-HTRd train | External subset | Raw | TBD | TBD | TBD |
+| CRNN-CTC | BN-HTRd train | BN-HTRd test | Processed | TBD | TBD | TBD |
+| CRNN-CTC | BN-HTRd train | External subset | Processed | TBD | TBD | TBD |
 
 ## Methodological Notes
 
@@ -150,7 +307,6 @@ The current run produces preliminary dataset and preprocessing results, not fina
 src/atika_htr/cli.py                 Reproducible analysis CLI
 scripts/download_hf_split.py         HF gated split downloader, token read from stdin
 scripts/write_public_readme.py       README manuscript generator
-scripts/build_manuscript_docx.py     DOCX manuscript generator
 results/                            Generated result tables and figures
 ```
 
@@ -171,4 +327,3 @@ The Hugging Face `BN-HTRd_Splitted` archive is gated. The supplied token was not
 
 if __name__ == "__main__":
     main()
-
